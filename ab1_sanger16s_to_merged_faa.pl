@@ -29,12 +29,12 @@ use Bio::SeqIO;
 #
 ###################################
 
-die "Number of argument is incorrect. Need excatly 2 arguments. 1 forward read and 1 reverse read in that order." if @ARGV != 2 ;
+die "Number of argument is incorrect. Need excatly 2 arguments. 1 forward read and 1 reverse read in that order.\n" if @ARGV != 2 ;
 
 my $file1 = shift;
 my $file2 = shift;
 my $qtrim_threshold = 20;
-
+my $fragment_length = 1350;
 my $fastq1 = ab1_to_fastq(file=>$file1);
 my $fastq2 = ab1_to_fastq(file=>$file2);
 
@@ -84,6 +84,10 @@ my $rev = reverse($read2[1]);
 $rev =~ tr/ACGTacgt/TGCAtgca/;
 $read2[1] = "$rev";
 $read2[3] = reverse($read2[3]);
+
+if(length($read1[1]) + length($read2[1]) < $fragment_length){
+    die "Not enough data to overlap confidently.\nExiting.\n";
+}
 
 # Print temp file for alignment with Muscle.
 open(ALNOUT,">temp_aln.fa");

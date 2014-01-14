@@ -81,7 +81,7 @@ $rev =~ tr/ACGTacgt/TGCAtgca/;
 $read2[1] = "$rev";
 $read2[3] = reverse($read2[3]);
 
-if(length($read1[1]) + length($read2[1]) < 1350){
+if(length($read1[1]) + length($read2[1]) < $fragment_length){
     die "Not enough data to overlap confidently.\nExiting.\n";
 }
 

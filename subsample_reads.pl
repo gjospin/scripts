@@ -10,15 +10,17 @@ use Getopt::Long;
 #
 # Purpose : Subsample PAIRED-END reads randomly down to a particular #
 #
-# Usage : subsample_reads.pl [options] <File1> (<File2>) <# of PAIRS reads to keep> <output file>
+# Usage : subsample_reads.pl [options] <File1> (<File2>) <# of PAIRS of reads to keep> <output file>
 #
 # Output is written in INTERLEAVED format
 #
-# Option : --trim ##    Cuts the reads and quality scores to a specified length
-#          --fastain    Forces the format of the input file(s) as FastA
-#          --fastaout   Forces the format of the output file as FastA
-#          --fastqin    Forces the format of the input file(s) as FastQ
-#          --fastqout   Forces the format of the output file as FastQ
+# Option : --trim ##     Cuts the reads and quality scores to a specified length
+#          --fastain     Forces the format of the input file(s) as FastA
+#          --fastaout    Forces the format of the output file as FastA
+#          --fastqin     Forces the format of the input file(s) as FastQ
+#          --fastqout    Forces the format of the output file as FastQ
+#          --interleaved Only 1 input file is submitted in interleaved format 
+#          -h --help     Prints this help message
 # Default : No trimming
 #           Fastq IN
 #           Fastq OUT
@@ -28,18 +30,21 @@ use Getopt::Long;
 #
 ############################################
 my $usage = qq{
-Usage : subsample_reads.pl [options] <File1> (<File2>) <# of PAIRS reads to keep> <output file>
+Usage : subsample_reads.pl [options] <File1> (<File2>) <# of PAIRS of reads to keep> <output file>
 
  Output is written in INTERLEAVED format
 
- Option : --trim ##    Cuts the reads and quality scores to a specified length
-          --fastain    Specifies the format of the input file(s) as FastA
-          --fastaout   Forces the format of the output file as FastA
-          --fastqin    Specifies the format of the input file(s) as FastQ
-          --fastqout   Forces the format of the output file as FastQ
+ Option : --trim ##     Cuts the reads and quality scores to a specified length
+          --fastain     Force the format of the input file(s) as FastA
+          --fastaout    Forces the format of the output file as FastA
+          --fastqin     Forces the format of the input file(s) as FastQ
+          --fastqout    Forces the format of the output file as FastQ
+          --interleaved Only 1 input file is submitted in interleaved format
+          --h --help    Prints this message
  Default : No trimming
            FastQ IN
            FastQ OUT
+           Non interleaved input file
 
  Example : >subsample_reads.pl --trim 150 --interleaved --fastaout myfile.fastq 50 myfile_subsampled.fasta
 
@@ -55,16 +60,22 @@ my $fastqin = 1;
 my $fastqout = 1;
 my $fastain = 0;
 my $fastaout = 0;
+my $help = 0;
+my $h = 0;
 GetOptions( "trim=i" => \$trim, # Length of resulting reads
 	    "interleaved" => \$interleaved,
 	    "fastain" => \$fastain,
 	    "fastqin" => \$fastqin,
 	    "fastaout"=> \$fastaout,
 	    "fastqout"=> \$fastqout,
+	    "help" => \$help,
+	    "h" => \$h,
     );
 
 $fastqin = 0 if $fastain;
 $fastqout = 0 if $fastaout;
+
+die "\n\n$usage" if @ARGV < 3 || $h || $help;
 
 print STDERR "Detected options as ";
 print STDERR "Non-" if $interleaved ==0;
@@ -119,11 +130,8 @@ my $count1k=0;
 my %keep1k=();
 # saving the # of headers that we want to keep
 for(my $i=0;$i< scalar(@total_reads);$i++){
-    my $num = rand(2);
-    if($num < 1){
-        $count1k++;
-	$keep1k{$total_reads[$i]}=1;
-    }
+    $count1k++;
+    $keep1k{$total_reads[$i]}=1;
     if($count1k ==$readpairs){
 	$i = scalar(@total_reads);
     }

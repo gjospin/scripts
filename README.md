@@ -6,12 +6,12 @@ trimmed files (adaptor contamination removed) and merged files (if the reads
 overlap, they will get merged and modify the headers to be qiime ready). It
 automatically detects the illumina nomenclature for index files.
 
-## required software
+## Required software
 
 * [Anthony Bolger's `trimmomatic.jar`](http://www.usadellab.org/cms/?page=trimmomatic)
 * [FLASH, a tool for merging paired-end reads](http://ccb.jhu.edu/software/FLASH/)
 
-## usage
+## Usage
 
 ```bash
 perl demultiplex_dualBC.pl <options> <illumina_directory> <mapping_file> <output_directory> <filename_core>`
@@ -77,4 +77,3 @@ index reads.  It allows 1 mismatch for each index read.
 
 **--min-read-length** [n] Discards reads that end up being shorter than the number
 after the QC (and maybe merging).
-

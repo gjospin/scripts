@@ -8,17 +8,14 @@ automatically detects the illumina nomenclature for index files.
 
 ## required software
 
-* Anthony Bolger's `trimmomatic.jar`, which can be obtained from the [Usadel Lab
-software page](http://www.usadellab.org/cms/?page=trimmomatic).
+* [Anthony Bolger's `trimmomatic.jar`](http://www.usadellab.org/cms/?page=trimmomatic)
 * [FLASH, a tool for merging paired-end reads](http://ccb.jhu.edu/software/FLASH/)
 
-```bash
+## usage
 
-perl demultiplex_dualBC.pl <options> <illumina_directory> <mapping_file> <output_directory> <filename_core>
-```
+`perl demultiplex_dualBC.pl **<options> <illumina_directory> <mapping_file> <output_directory> <filename_core>**`
 
 **illumina_directory** The directory where the raw Illumina output lives.
-
 
 **mapping_file** A tab delimited, QIIME-style mapping file, like so :
 

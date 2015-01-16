@@ -13,7 +13,7 @@ automatically detects the illumina nomenclature for index files.
 
 ## usage
 
-`perl demultiplex_dualBC.pl **<options> <illumina_directory> <mapping_file> <output_directory> <filename_core>**`
+perl demultiplex_dualBC.pl **<options> <illumina_directory> <mapping_file> <output_directory> <filename_core>**
 
 **illumina_directory** The directory where the raw Illumina output lives.
 

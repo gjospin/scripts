@@ -44,6 +44,7 @@ my $min_read_length   = 150;
 my $skip_interleaved  = 0;
 my $adaptor_file;
 my $trim_path;
+my $chunk_size = 96; #processes X many samples at a time to not overload the number of opened filehandles.
 GetOptions(
 			"full-print"        => \$full_print,
 			"reverse"           => \$reverse,
@@ -61,6 +62,7 @@ GetOptions(
 			"skip-interleaved"  => \$skip_interleaved,
     "trim-file=s" => \$adaptor_file,
     "trim-tool=s" => \$trim_path,
+    "chunk-size=i" => \$chunk_size,
 );
 my $usage = "Wrong number of arguments\nUsage:\ndemultiplex_dualBC.pl <options> <illumina_directory> <mapping_file> <output_directory> <filename_core>\n";
 die("$usage")                            if @ARGV != 4;
@@ -98,15 +100,13 @@ my $header = <INBC>;
 $header =~ s/^#//;
 my @cols                    = split( /\s+/, $header );
 my %mapping                 = ();
-my %output_filehandles_1    = ();
-my %output_filehandles_2    = ();
-my %output_filehandles_full = ();
 my %sample_read_count       = ();
 my %mapping_file            = ();
 my %total_codes             = ();
-my %barcode                 = ();
+my %barcode_in              = ();
 my %samples                 = ();
 my $line_count              = 0;
+my %bc_count=();
 while (<INBC>) {
 	chomp($_);
 	next if $_ eq "";
@@ -137,9 +137,9 @@ while (<INBC>) {
 		die "*** Exiting *** Barcode sequence".$mapping_file{ $line[0] }{"ReverseBarcode"}." has illigal characters (not ATCG)\n";
 	}
 	my $code_original = $mapping_file{ $line[0] }{"BarcodeSequence"}.$mapping_file{ $line[0] }{"ReverseBarcode"};
-	print STDERR "WARNING: $line[0]\t$code_original was already defined for $barcode{$code_original}\n"
-	  if defined $barcode{$code_original} && $barcode{$code_original} ne $line[0];
-	$barcode{$code_original} = $line[0];
+	print STDERR "WARNING: $line[0]\t$code_original was already defined for $barcode_in{$code_original}\n"
+	  if defined $barcode_in{$code_original} && $barcode_in{$code_original} ne $line[0];
+	$barcode_in{$code_original} = $line[0];
 	unless ($no_mismatch) {
 
 		# insert all single-error barcodes
@@ -154,18 +154,26 @@ while (<INBC>) {
 					foreach my $ck2 (@chars2) {
 						substr( $s2, $_, 1 ) =~ s/[ACGT]/$ck2/ for $j;
 						my $long_code = $s.$s2;
-						print STDERR "WARNING: $line[0]\t$long_code was already defined for $barcode{$long_code}\n"
-						  if defined $barcode{$long_code} && $barcode{$long_code} ne $line[0];
-						$barcode{$long_code} = $line[0];
+						print STDERR "WARNING: $line[0]\t$long_code was already defined for $barcode_in{$long_code}\n"
+						  if defined $barcode_in{$long_code} && $barcode_in{$long_code} ne $line[0];
+						$barcode_in{$long_code} = $line[0];
 					}
 				}
 			}
 		}
 	}
+	if($line_count % $chunk_size == 0){
+	    launch_intermediate_demultiplex(\%barcode_in);
+	    %barcode_in = ();
+	}
+
 }
+# Process the remaining barcodes
+launch_intermediate_demultiplex(\%barcode_in);
+
 print STDERR "Found ".scalar( keys %samples )." samples. Read $line_count non-empty lines in the mapping file\n";
-print STDERR "*** Warning ***  Lots of samples within the same mapping file may not work.  A safe batch of samples is 96 or lower.\n" if $line_count > 96;
-print STDERR "Total number of barcodes : ".scalar( keys %barcode );
+#print STDERR "*** Warning ***  Lots of samples within the same mapping file may not work.  A safe batch of samples is 96 or lower.\n" if $line_count > 96;
+#print STDERR "Total number of barcodes : ".scalar( keys %barcode );
 print STDERR " using 1 maximum mismatch per barcode" unless $no_mismatch;
 print STDERR "\n";
 close(INBC);
@@ -175,29 +183,41 @@ close(INBC);
 #		print "$fw\t$rv\t$mapping{$fw}{$rv}\n";
 #	}
 #}
-my %bc_count = ();
-# Opening filehandles for future print statements
-foreach my $code ( sort keys %barcode ) {
+
+
+sub launch_intermediate_demultiplex{
+    my $barcode_ref = shift;
+    my %barcode=%{$barcode_ref};
+    my @codes = keys(%barcode);
+    
+    
+    
+    my %output_filehandles_1=();
+    my %output_filehandles_2=();
+    my %output_filehandles_full=();
+    
+    print STDERR "Demultiplexing for ".scalar(@codes)." barcodes\n";
+    foreach my $code ( @codes ) {
 	unless ($skip_interleaved) {
-		$output_filehandles_full{ $barcode{$code} } = new IO::Zlib;
-		$output_filehandles_full{ $barcode{$code} }->open( "$output_dir/interleaved_fastq/$out_file_core"."_$barcode{$code}.fastq.gz", "wb9" );
+	    $output_filehandles_full{ $barcode{$code} } = new IO::Zlib;
+	    $output_filehandles_full{ $barcode{$code} }->open( "$output_dir/interleaved_fastq/$out_file_core"."_$barcode{$code}.fastq.gz", "wb9" );
 	}
 	open( $output_filehandles_1{ $barcode{$code} }, ">$output_dir/raw_fastq/$out_file_core"."_$barcode{$code}"."_1".".fastq" ) unless $skip_merge;
 	open( $output_filehandles_2{ $barcode{$code} }, ">$output_dir/raw_fastq/$out_file_core"."_$barcode{$code}"."_2".".fastq" ) unless $skip_merge;
 	$bc_count{$barcode{$code}}=0;
-}
-
-## FastQ files are assumed to be gzipped.  .gz filenames
-
-my @files    = <$ARGV[0]/*_R1_*.fastq.gz>;
-foreach my $file (@files) {
+    }
+    
+    ## FastQ files are assumed to be gzipped.  .gz filenames
+	
+    my @files    = <$ARGV[0]/*_R1_*.fastq.gz>;
+    foreach my $file (@files) {
 	print STDERR "Processing $file\n";
 	$file =~ m/^(\S+)_\S\S_(\d+).fastq.gz/;
 	my $core  = $1;
 	my $index = $2;
 	open( my $TYPETEST, "zcat $file |" );
 	my $type = get_sequence_input_type($TYPETEST);
-
+	
 	#print STDERR "TYPE :".$type->{qtype}."\n";
 	close($TYPETEST);
 	my $read_type = $type->{qtype};
@@ -211,76 +231,77 @@ foreach my $file (@files) {
 	my @index2 = ();
 	## read the reads and indices from the input files.
 	while (1) {
-		for ( my $i = 0; $i < 4; $i++ ) {
-			if ($reverse) {
-				$read1[$i]  = <READ2>;
-				$read2[$i]  = <READ1>;
-				$index1[$i] = <INDEX2>;
-				$index2[$i] = <INDEX1>;
-			} else {
-				$read1[$i]  = <READ1>;
-				$read2[$i]  = <READ2>;
-				$index1[$i] = <INDEX1>;
-				$index2[$i] = <INDEX2>;
-			}
-		}
-		## stop reading if we reached the end of the files
-		last if !defined( $read1[0] );
-		## figure out what barcodes we are dealing with
-		my $i1 = $index1[1];
-		my $i2 = $index2[1];
-		chomp($i1);
-		chomp($i2);
-		$total_codes{$i1}{$i2} = 0 unless exists $total_codes{$i1}{$i2};
-		$total_codes{$i1}{$i2}++;
-		my $long_code = $i1.$i2;
-
-		if ( exists $barcode{$long_code} ) {
-
-			#print "FOUND CODE\n";
-			$bc_count{ $barcode{$long_code} } = 0 unless exists $bc_count{ $barcode{$long_code} };
-			$bc_count{ $barcode{$long_code} }++;
-			my $READ_HANDLE_1    = $output_filehandles_1{ $barcode{$long_code} };
-			my $READ_HANDLE_2    = $output_filehandles_2{ $barcode{$long_code} };
-			my $READ_HANDLE_FULL = $output_filehandles_full{ $barcode{$long_code} } unless $skip_interleaved;
-			## quality trim the reads
-			qtrim_read( read => \@read1, quality => $quality_threshold, readtype => $type );
-			qtrim_read( read => \@read2, quality => $quality_threshold, readtype => $type );
-			## print the trimmed reads to an intermediate file if specified in $full_print
-
-			## merge the reads if possible
-			## my @merged_read = align_and_merge_reads(read1=> \@read1, read2=> \@read2 );
-
-			## print the merged reads to an intermediate file if specified in $full_print
-			## discard the reads if it wasn't possible to merge
-			$read1[0] = clean_line( line => $read1[0], num => 1 );
-			$read2[0] = clean_line( line => $read2[0], num => 2 );
-
-			## Change the read header to accomodate for barcoding.
-			## print the reads to their respective files
-			print $READ_HANDLE_FULL @read1 if exists $output_filehandles_full{ $barcode{$long_code} } && !$skip_interleaved;
-			print $READ_HANDLE_FULL @read2 if exists $output_filehandles_full{ $barcode{$long_code} } && !$skip_interleaved;
-			print $READ_HANDLE_1 @read1    if exists $output_filehandles_1{ $barcode{$long_code} };
-			print $READ_HANDLE_2 @read2    if exists $output_filehandles_2{ $barcode{$long_code} };
+	    for ( my $i = 0; $i < 4; $i++ ) {
+		if ($reverse) {
+		    $read1[$i]  = <READ2>;
+		    $read2[$i]  = <READ1>;
+		    $index1[$i] = <INDEX2>;
+		    $index2[$i] = <INDEX1>;
 		} else {
-			$bc_count{mismatch} = 0 unless exists $bc_count{mismatch};
-			$bc_count{mismatch}++;
+		    $read1[$i]  = <READ1>;
+		    $read2[$i]  = <READ2>;
+		    $index1[$i] = <INDEX1>;
+		    $index2[$i] = <INDEX2>;
+		}
+	    }
+	    ## stop reading if we reached the end of the files
+		last if !defined( $read1[0] );
+	    ## figure out what barcodes we are dealing with
+	    my $i1 = $index1[1];
+	    my $i2 = $index2[1];
+	    chomp($i1);
+	    chomp($i2);
+	    $total_codes{$i1}{$i2} = 0 unless exists $total_codes{$i1}{$i2};
+		$total_codes{$i1}{$i2}++;
+	    my $long_code = $i1.$i2;
+	    
+		if ( exists $barcode{$long_code} ) {
+		    #print "FOUND CODE\n";
+		    $bc_count{ $barcode{$long_code} } = 0 unless exists $bc_count{ $barcode{$long_code} };
+		    $bc_count{ $barcode{$long_code} }++;
+		    my $READ_HANDLE_1    = $output_filehandles_1{ $barcode{$long_code} };
+		    my $READ_HANDLE_2    = $output_filehandles_2{ $barcode{$long_code} };
+		    my $READ_HANDLE_FULL = $output_filehandles_full{ $barcode{$long_code} } unless $skip_interleaved;
+		    ## quality trim the reads
+		    qtrim_read( read => \@read1, quality => $quality_threshold, readtype => $type );
+		    qtrim_read( read => \@read2, quality => $quality_threshold, readtype => $type );
+		    ## print the trimmed reads to an intermediate file if specified in $full_print
+		    
+		    ## merge the reads if possible
+		    ## my @merged_read = align_and_merge_reads(read1=> \@read1, read2=> \@read2 );
+		    
+		    ## print the merged reads to an intermediate file if specified in $full_print
+		    ## discard the reads if it wasn't possible to merge
+		    $read1[0] = clean_line( line => $read1[0], num => 1 );
+		    $read2[0] = clean_line( line => $read2[0], num => 2 );
+		    
+		    ## Change the read header to accomodate for barcoding.
+		    ## print the reads to their respective files
+		    print $READ_HANDLE_FULL @read1 if exists $output_filehandles_full{ $barcode{$long_code} } && !$skip_interleaved;
+		    print $READ_HANDLE_FULL @read2 if exists $output_filehandles_full{ $barcode{$long_code} } && !$skip_interleaved;
+		    print $READ_HANDLE_1 @read1    if exists $output_filehandles_1{ $barcode{$long_code} };
+		    print $READ_HANDLE_2 @read2    if exists $output_filehandles_2{ $barcode{$long_code} };
+		    last;
+		} else {
+		    $bc_count{mismatch} = 0 unless exists $bc_count{mismatch};
+		    $bc_count{mismatch}++;
 		}
 	}
-}
+	}
+	
 ##close files and flush IO buffers
-foreach my $handle ( keys(%output_filehandles_1) ) {
+    foreach my $handle ( keys(%output_filehandles_1) ) {
 	$output_filehandles_1{$handle}->close();
 	$output_filehandles_2{$handle}->close();
 	if ( -z "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq" ) {
-		print STDERR "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq"." is empty, can't align and merge reads\n";
-		next;
+	    print STDERR "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq"." is empty, can't align and merge reads\n";
+	    next;
 	}
 	if ( -z "$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq" ) {
-		print STDERR "$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq"." is empty, can't align and merge reads\n";
-		next;
+	    print STDERR "$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq"." is empty, can't align and merge reads\n";
+	    next;
 	}
-
+	
 	my $source_dir= "raw_fastq";
 	if($trim_path && $adaptor_file){
 	    # Need to trim out adaptors in case we read through the other end of the read.
@@ -289,7 +310,7 @@ foreach my $handle ( keys(%output_filehandles_1) ) {
 	    `$trim_cmd`;
 	    $source_dir = "trimmed_fastq";
 	}
-
+	
 	
 	
 	#print "HANDLE : $handle\n";
@@ -304,100 +325,101 @@ foreach my $handle ( keys(%output_filehandles_1) ) {
 #	  ."_2P" if ($source_dir eq "trimmed_fastq");
 #	  ."_2.fastq\""; 
 	$flash_cmd .="$options -d \"$output_dir/qiime_ready\" -o \"$out_file_core"
-	  .".$handle\" > /dev/null 2> /dev/null";
-
+	    .".$handle\" > /dev/null 2> /dev/null";
+	
 	print STDERR "RUNNING : $flash_cmd\n";
 	system($flash_cmd)
-	  unless -z "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq" && -z "$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq";
+	    unless -z "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq" && -z "$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq";
 	open( OUT_QIIME,     ">$output_dir/qiime_ready/$out_file_core.M.".$handle.".faa" );
 	open( OUT_QIIME_FOR, ">$output_dir/qiime_ready/$out_file_core.MPF.".$handle.".faa" );
 	open( OUT_QIIME_REV, ">$output_dir/qiime_ready/$out_file_core.MPR.".$handle.".faa" );
 	
 	$sample_read_count{$handle} = 0;
 	if ( -e "$output_dir/qiime_ready/$out_file_core.".$handle.".extendedFrags.fastq" ) {
-		open( INMERGED, "$output_dir/qiime_ready/$out_file_core.".$handle.".extendedFrags.fastq" );
-		my @read = ();
-		while (<INMERGED>) {
-			$read[0] = $_;
-			$read[1] = <INMERGED>;
-			$read[2] = <INMERGED>;
-			$read[3] = <INMERGED>;
-			my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
-			$qiime_read1[0] =~ s/\n/\tMerged\n/;
-
-			#		print STDERR "qiime_Ready ready @qiime_read1";
-			print OUT_QIIME_REV @qiime_read1;
-			print OUT_QIIME_FOR @qiime_read1;
-			print OUT_QIIME @qiime_read1;
-			@read = ();
-		}
-		close(INMERGED);
+	    open( INMERGED, "$output_dir/qiime_ready/$out_file_core.".$handle.".extendedFrags.fastq" );
+	    my @read = ();
+	    while (<INMERGED>) {
+		$read[0] = $_;
+		$read[1] = <INMERGED>;
+		$read[2] = <INMERGED>;
+		$read[3] = <INMERGED>;
+		my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
+		$qiime_read1[0] =~ s/\n/\tMerged\n/;
+		
+		#		print STDERR "qiime_Ready ready @qiime_read1";
+		print OUT_QIIME_REV @qiime_read1;
+		print OUT_QIIME_FOR @qiime_read1;
+		print OUT_QIIME @qiime_read1;
+		@read = ();
+	    }
+	    close(INMERGED);
 	} else {
-		print STDERR "$output_dir/qiime_ready/$out_file_core.".$handle.".extendedFrags.fastq was not found\n";
-		next;
+	    print STDERR "$output_dir/qiime_ready/$out_file_core.".$handle.".extendedFrags.fastq was not found\n";
+	    next;
 	}
 	my $count = 0;
 	if ( -e "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq" ) {
-		open( INFORWARD, "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq" );
-		my @read = ();
-		while (<INFORWARD>) {
-			$read[0] = $_;
-			$read[1] = <INFORWARD>;
-			$read[2] = <INFORWARD>;
-			$read[3] = <INFORWARD>;
-
-			#		print "Read $read[1]";
-			qtrim_read( read => \@read, readtype => "phred".$phred_value, quality => $quality_threshold );
-
-			#		print "Read $read[1]"."Lengh of new_Read = ".length( $read[1] )."\n\n\n";
-			next if length( $read[1] ) < $min_read_length;
-			my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
-
-			#print STDERR "qiime_Ready ready @qiime_read1";
-			$qiime_read1[0] =~ s/\n/\tNot_merged\n/;
-			print OUT_QIIME_FOR @qiime_read1;
-			@read = ();
-			$count++;
-		}
-		close(INFORWARD);
+	    open( INFORWARD, "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq" );
+	    my @read = ();
+	    while (<INFORWARD>) {
+		$read[0] = $_;
+		$read[1] = <INFORWARD>;
+		$read[2] = <INFORWARD>;
+		$read[3] = <INFORWARD>;
+		
+		#		print "Read $read[1]";
+		qtrim_read( read => \@read, readtype => "phred".$phred_value, quality => $quality_threshold );
+		
+		#		print "Read $read[1]"."Lengh of new_Read = ".length( $read[1] )."\n\n\n";
+		next if length( $read[1] ) < $min_read_length;
+		my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
+		
+		#print STDERR "qiime_Ready ready @qiime_read1";
+		$qiime_read1[0] =~ s/\n/\tNot_merged\n/;
+		print OUT_QIIME_FOR @qiime_read1;
+		@read = ();
+		$count++;
+	    }
+	    close(INFORWARD);
 	} else {
-		print STDERR "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq was not found\n";
+	    print STDERR "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq was not found\n";
 	}
 	##reset the read count increment
 	$sample_read_count{$handle} = $sample_read_count{$handle} - $count;
-
+	
 	if ( -e "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_2.fastq" ) {
-		open( INREVERSE, "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_2.fastq" );
-		my @read = ();
-		while (<INREVERSE>) {
-			$read[0] = $_;
-			$read[1] = <INREVERSE>;
-			$read[2] = <INREVERSE>;
-			$read[3] = <INREVERSE>;
-			qtrim_read( read => \@read, readtype => "phred".$phred_value, quality => $quality_threshold );
-			next if length( $read[1] ) < $min_read_length;
-			my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
-
+	    open( INREVERSE, "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_2.fastq" );
+	    my @read = ();
+	    while (<INREVERSE>) {
+		$read[0] = $_;
+		$read[1] = <INREVERSE>;
+		$read[2] = <INREVERSE>;
+		$read[3] = <INREVERSE>;
+		qtrim_read( read => \@read, readtype => "phred".$phred_value, quality => $quality_threshold );
+		next if length( $read[1] ) < $min_read_length;
+		my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
+		
 			#print STDERR "qiime_Ready ready @qiime_read1";
-			$qiime_read1[0] =~ s/\n/\tNot_merged\n/;
-			print OUT_QIIME_REV @qiime_read1;
-			@read = ();
-			$count++;
-		}
+		$qiime_read1[0] =~ s/\n/\tNot_merged\n/;
+		print OUT_QIIME_REV @qiime_read1;
+		@read = ();
+		$count++;
+	    }
 		close(INREVERSE);
 	} else {
-		print STDERR "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq was not found\n";
+	    print STDERR "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq was not found\n";
 	}
 	close(OUT_QIIME);
-
+	
 	#zip the raw files
 	my $file_1 = "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq"; 
 	my $file_2 = "$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq"; 
 	`gzip -f "$file_1"`;
 	`gzip -f "$file_2"`;
+    }
 }
-
 ## Write a summary of the run
+print STDERR "Found ".scalar(keys(%bc_count))."entries in bc_count\n";
 open( OUT, ">$output_dir/summary.txt" );
 foreach my $code ( sort { $bc_count{$a} <=>$bc_count{$b} } keys %bc_count ) {
 	print OUT $code."\t".$bc_count{$code}."\n";

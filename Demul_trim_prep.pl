@@ -281,7 +281,6 @@ sub launch_intermediate_demultiplex{
 		    print $READ_HANDLE_FULL @read2 if exists $output_filehandles_full{ $barcode{$long_code} } && !$skip_interleaved;
 		    print $READ_HANDLE_1 @read1    if exists $output_filehandles_1{ $barcode{$long_code} };
 		    print $READ_HANDLE_2 @read2    if exists $output_filehandles_2{ $barcode{$long_code} };
-		    last;
 		} else {
 		    $bc_count{mismatch} = 0 unless exists $bc_count{mismatch};
 		    $bc_count{mismatch}++;

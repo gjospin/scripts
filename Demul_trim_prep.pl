@@ -107,6 +107,11 @@ my %barcode_in              = ();
 my %samples                 = ();
 my $line_count              = 0;
 my %bc_count=();
+my %Q20_count=();
+my %trimmed_count=();
+my %merged_count =();
+my %mpr_count=();
+my %mpf_count=();
 while (<INBC>) {
 	chomp($_);
 	next if $_ eq "";
@@ -252,7 +257,7 @@ sub launch_intermediate_demultiplex{
 	    chomp($i1);
 	    chomp($i2);
 	    $total_codes{$i1}{$i2} = 0 unless exists $total_codes{$i1}{$i2};
-		$total_codes{$i1}{$i2}++;
+	    $total_codes{$i1}{$i2}++;
 	    my $long_code = $i1.$i2;
 	    
 		if ( exists $barcode{$long_code} ) {
@@ -281,12 +286,13 @@ sub launch_intermediate_demultiplex{
 		    print $READ_HANDLE_FULL @read2 if exists $output_filehandles_full{ $barcode{$long_code} } && !$skip_interleaved;
 		    print $READ_HANDLE_1 @read1    if exists $output_filehandles_1{ $barcode{$long_code} };
 		    print $READ_HANDLE_2 @read2    if exists $output_filehandles_2{ $barcode{$long_code} };
+
 		} else {
 		    $bc_count{mismatch} = 0 unless exists $bc_count{mismatch};
 		    $bc_count{mismatch}++;
 		}
 	}
-	}
+    }
 	
 ##close files and flush IO buffers
     foreach my $handle ( keys(%output_filehandles_1) ) {
@@ -308,10 +314,20 @@ sub launch_intermediate_demultiplex{
 	    my $trim_cmd = "java -jar $trim_path/trimmomatic.jar PE -phred33 -baseout \"$output_dir/trimmed_fastq/$out_file_core"."_$handle\" \"$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq\" \"$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq\" ILLUMINACLIP:$adaptor_file:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:50 >/dev/null 2>/dev/null";
 	    `$trim_cmd`;
 	    $source_dir = "trimmed_fastq";
+	
+	
+	    # Count how many reads are left after the trimming.
+	    print STDERR "trying to read $output_dir/$source_dir/$out_file_core"."_$handle"."_1P\n";
+	    open(INTRIM,"$output_dir/$source_dir/$out_file_core"."_$handle"."_1P") or die "Could not find $output_dir/$source_dir/$out_file_core"."_$handle"."_1P\n";
+	    $trimmed_count{$handle}=0;
+	    while(<INTRIM>){
+		<INTRIM>;
+		<INTRIM>;
+		<INTRIM>;
+		$trimmed_count{$handle}++;
+	    }
+	    close(INTRIM);
 	}
-	
-	
-	
 	#print "HANDLE : $handle\n";
 	#print "PHRED VALUE : $phred_value\n";
 	my $options   = "-m $min_overlap -M $max_overlap -p $phred_value -s $fragment_std -r $read_length -x $mismatch_ratio";
@@ -332,6 +348,11 @@ sub launch_intermediate_demultiplex{
 	open( OUT_QIIME,     ">$output_dir/qiime_ready/$out_file_core.M.".$handle.".faa" );
 	open( OUT_QIIME_FOR, ">$output_dir/qiime_ready/$out_file_core.MPF.".$handle.".faa" );
 	open( OUT_QIIME_REV, ">$output_dir/qiime_ready/$out_file_core.MPR.".$handle.".faa" );
+
+
+	$merged_count{$handle}=0;
+	$mpr_count{$handle}=0;
+	$mpf_count{$handle}=0;
 	
 	$sample_read_count{$handle} = 0;
 	if ( -e "$output_dir/qiime_ready/$out_file_core.".$handle.".extendedFrags.fastq" ) {
@@ -344,7 +365,12 @@ sub launch_intermediate_demultiplex{
 		$read[3] = <INMERGED>;
 		my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
 		$qiime_read1[0] =~ s/\n/\tMerged\n/;
-		
+		$merged_count{$handle}++;
+		$mpr_count{$handle}++;
+		$mpf_count{$handle}++;
+
+				 
+
 		#		print STDERR "qiime_Ready ready @qiime_read1";
 		print OUT_QIIME_REV @qiime_read1;
 		print OUT_QIIME_FOR @qiime_read1;
@@ -375,6 +401,7 @@ sub launch_intermediate_demultiplex{
 		
 		#print STDERR "qiime_Ready ready @qiime_read1";
 		$qiime_read1[0] =~ s/\n/\tNot_merged\n/;
+		$mpf_count{$handle}++;
 		print OUT_QIIME_FOR @qiime_read1;
 		@read = ();
 		$count++;
@@ -401,6 +428,7 @@ sub launch_intermediate_demultiplex{
 			#print STDERR "qiime_Ready ready @qiime_read1";
 		$qiime_read1[0] =~ s/\n/\tNot_merged\n/;
 		print OUT_QIIME_REV @qiime_read1;
+		$mpr_count{$handle}++;
 		@read = ();
 		$count++;
 	    }
@@ -420,8 +448,43 @@ sub launch_intermediate_demultiplex{
 ## Write a summary of the run
 print STDERR "Found ".scalar(keys(%bc_count))."entries in bc_count\n";
 open( OUT, ">$output_dir/summary.txt" );
+print OUT "Sample_ID\tRaw_count\tTrimmed_count\tPCt_of_raw_count\tMerged_count\tPct_of_raw_count\tMPF_count\tMPR_count\n";
 foreach my $code ( sort { $bc_count{$a} <=>$bc_count{$b} } keys %bc_count ) {
-	print OUT $code."\t".$bc_count{$code}."\n";
+	print OUT $code."\t".$bc_count{$code}."\t";
+	if (exists $trimmed_count{$code}){
+	    print OUT $trimmed_count{$code}."\t";
+	    
+	    my $pct = 100*$trimmed_count{$code} / $bc_count{$code};
+	    my $trim_rounded = sprintf("%.2f", $pct);
+	    print OUT $trim_rounded."\t";
+	}else{
+	    print OUT "-\t-\t";
+	}
+	
+	if (exists $merged_count{$code}){
+            print OUT $merged_count{$code}."\t";
+	    my $pct = 100*$merged_count{$code} / $bc_count{$code};
+            my $merge_rounded = sprintf("%.2f", $pct);
+            print OUT $merge_rounded."\t";
+        }else{
+            print OUT "-\t-\t";
+        }
+
+	if (exists $mpf_count{$code}){
+            print OUT $mpf_count{$code}."\t";
+        }else{
+            print OUT "-\t";
+        }
+
+	if (exists $mpr_count{$code}){
+            print OUT $mpr_count{$code}."\n";
+        }else{
+            print OUT "-\n";
+        }
+
+	
+
+
 }
 close(OUT);
 

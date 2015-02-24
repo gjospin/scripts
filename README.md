@@ -5,6 +5,7 @@ interleaved files (zipped), non interleaved files (I think not zippped),
 trimmed files (adaptor contamination removed) and merged files (if the reads
 overlap, they will get merged and modify the headers to be qiime ready). It
 automatically detects the illumina nomenclature for index files.
+Samples are demultiplexed 96 at a time by default. The script will loop until all samples are processed.
 
 ## Required software
 
@@ -34,6 +35,10 @@ SAMPLE3         AACGCTAA        GTAGTCTT
 names, which will look like `<core>_<samplename>.faa`.
 
 ### Options
+
+**--chunk-size** : Will process this many samples at a time. This is to prevent having to split
+the mapping file in case there are lots of samples. 96 seemed like a good/safe number. 
+Increase at your own risk.
 
 **--trim-file** : Adapter sequences that need to be removed from the raw data in
 the case of contamination.  An example is found in `adapter_all_16s.txt`.

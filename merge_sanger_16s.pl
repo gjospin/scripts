@@ -7,7 +7,7 @@ use warnings;
 # Author : Guillaume Jospin
 # Date : Jan 13th 2014
 #
-# Usage : >perl merge_sanger_16s.pl file1.fastq file2.fastq
+# Usage : >perl merge_sanger_16s.pl muscle_path file1.fastq file2.fastq
 #
 # Pre-reqs : Bio::SeqIO (Bio perl) http://search.cpan.org/~cjfields/BioPerl-1.6.901/Bio/SeqIO.pm
 #            Muscle - http://www.drive5.com/muscle/
@@ -19,7 +19,6 @@ use warnings;
 #
 #     Assumes that forward is the first file submitted and reverse is the second.
 #     Assumes that the reads overlap after the quality trimming.
-#     Assumes that muscle is accessible from the user's path.
 #     Assumes quality scores of in the PHRED33 format/scale
 #
 #
@@ -27,8 +26,9 @@ use warnings;
 #
 ###################################
 
-die "Number of argument is incorrect. Need excatly 2 arguments. 1 forward read and 1 reverse read in that order.\n" if @ARGV != 2 ;
+die "Number of argument is incorrect. Need excatly 3 arguments. The Location of the muscle executable, 1 forward read and 1 reverse read in that order.\n" if @ARGV != 3 ;
 
+my $muscle_path = shift;
 my $file1 = shift;
 my $file2 = shift;
 my $qtrim_threshold = 20;
@@ -94,7 +94,7 @@ print ALNOUT ">reverse\n$read2[1]\n";
 close(ALNOUT);
 
 # aligning the two sequences.
-`muscle -in temp_aln.fa -out temp_aln.aln > /dev/null 2> /dev/null`;
+`$muscle_path -in temp_aln.fa -out temp_aln.aln > /dev/null 2> /dev/null`;
 
 # read in the alignment.
 open(INALN, "temp_aln.aln");

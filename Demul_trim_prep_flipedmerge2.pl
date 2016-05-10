@@ -45,6 +45,7 @@ my $skip_interleaved  = 0;
 my $adaptor_file;
 my $trim_path;
 my $chunk_size = 96; #processes X many samples at a time to not overload the number of opened filehandles.
+my $demul_only = 0;
 GetOptions(
 			"full-print"        => \$full_print,
 			"reverse"           => \$reverse,
@@ -63,6 +64,7 @@ GetOptions(
     "trim-file=s" => \$adaptor_file,
     "trim-tool=s" => \$trim_path,
     "chunk-size=i" => \$chunk_size,
+    "demul-only" => \$demul_only,
 );
 my $usage = "Wrong number of arguments\nUsage:\ndemultiplex_dualBC.pl <options> <illumina_directory> <mapping_file> <output_directory> <filename_core>\n";
 die("$usage")                            if @ARGV != 4;
@@ -86,13 +88,14 @@ print STDERR "Creating $output_dir/interleaved_fastq\n" unless -e "$output_dir/i
 print STDERR "Creating $output_dir/raw_fastq\n" unless -e $output_dir."/raw_fastq";
 `mkdir -p $output_dir/raw_fastq`                unless -e $output_dir."/raw_fastq";
 ##if the $output_dir does not exists create it.
-print STDERR "Creating $output_dir/qiime_ready\n" unless -e $output_dir."/qiime_ready";
+unless($demul_only){
+    print STDERR "Creating $output_dir/qiime_ready\n" unless -e $output_dir."/qiime_ready";
 `mkdir -p $output_dir/qiime_ready`                unless -e $output_dir."/qiime_ready";
-
+    
 ##if the $output_dir/trimmed_fastq does not exists create it.
-print STDERR "Creating $output_dir/trimmed_fastq\n" unless -e $output_dir."/trimmed_fastq";
-`mkdir -p $output_dir/trimmed_fastq`                unless -e $output_dir."/trimmed_fastq";
-
+    print STDERR "Creating $output_dir/trimmed_fastq\n" unless -e $output_dir."/trimmed_fastq";
+    `mkdir -p $output_dir/trimmed_fastq`                unless -e $output_dir."/trimmed_fastq";
+}
 print STDERR "Reading barcodes and sample mapping\n";
 
 open( INBC, $ARGV[1] );
@@ -298,6 +301,7 @@ sub launch_intermediate_demultiplex{
     foreach my $handle ( keys(%output_filehandles_1) ) {
 	$output_filehandles_1{$handle}->close();
 	$output_filehandles_2{$handle}->close();
+	next if $demul_only;
 	if ( -z "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq" ) {
 	    print STDERR "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq"." is empty, can't align and merge reads\n";
 	    next;
@@ -308,37 +312,11 @@ sub launch_intermediate_demultiplex{
 	}
 	
 	my $source_dir= "raw_fastq";
-#	if($trim_path && $adaptor_file){
-	    # Need to trim out adaptors in case we read through the other end of the read.
-	    # Trimming the content of $adaptor_file
-#	    my $trim_cmd = "java -jar $trim_path/trimmomatic.jar PE -phred33 -baseout \"$output_dir/trimmed_fastq/$out_file_core"."_$handle\" \"$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq\" \"$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq\" ILLUMINACLIP:$adaptor_file:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:50 >/dev/null 2>/dev/null";
-#	    `$trim_cmd`;
-#	    $source_dir = "trimmed_fastq";
-	
-	
-	    # Count how many reads are left after the trimming.
-#	    print STDERR "trying to read $output_dir/$source_dir/$out_file_core"."_$handle"."_1P\n";
-#	    open(INTRIM,"$output_dir/$source_dir/$out_file_core"."_$handle"."_1P") or die "Could not find $output_dir/$source_dir/$out_file_core"."_$handle"."_1P\n";
-#	    $trimmed_count{$handle}=0;
-#	    while(<INTRIM>){
-#		<INTRIM>;
-#		<INTRIM>;
-#		<INTRIM>;
-#		$trimmed_count{$handle}++;
-#	    }
-#	    close(INTRIM);
-#	}
-	#print "HANDLE : $handle\n";
-	#print "PHRED VALUE : $phred_value\n";
 	my $options   = "-m $min_overlap -M $max_overlap -p $phred_value -s $fragment_std -r $read_length -x $mismatch_ratio";
 	my $flash_cmd ="flash2 \"$output_dir/$source_dir/$out_file_core"."_$handle";
 	$flash_cmd .= $source_dir eq "trimmed_fastq" ? "_1P\" ":"_1.fastq\" ";
-#	  ."_1P" if ($source_dir eq "trimmed_fastq");
-#	  ."_1.fastq\"";
 	$flash_cmd .= "\"$output_dir/$source_dir/$out_file_core"."_$handle";
 	$flash_cmd .= $source_dir eq "trimmed_fastq" ? "_2P\" ":"_2.fastq\" ";
-#	  ."_2P" if ($source_dir eq "trimmed_fastq");
-#	  ."_2.fastq\""; 
 	$flash_cmd .="$options -d \"$output_dir/qiime_ready\" -o \"$out_file_core"
 	    .".$handle\" > /dev/null 2> /dev/null";
 	
@@ -396,9 +374,6 @@ sub launch_intermediate_demultiplex{
 		$merged_count{$handle}++;
 		$mpr_count{$handle}++;
 		$mpf_count{$handle}++;
-
-				 
-
 		#		print STDERR "qiime_Ready ready @qiime_read1";
 		print OUT_QIIME_REV @qiime_read1;
 		print OUT_QIIME_FOR @qiime_read1;
@@ -411,64 +386,11 @@ sub launch_intermediate_demultiplex{
 	    next;
 	}
 	my $count = 0;
-#	if ( -e "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq" ) {
-#	    open( INFORWARD, "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq" );
-#	    my @read = ();
-#	    while (<INFORWARD>) {
-#		$read[0] = $_;
-#		$read[1] = <INFORWARD>;
-#		$read[2] = <INFORWARD>;
-#		$read[3] = <INFORWARD>;
-		
-		#		print "Read $read[1]";
-#		qtrim_read( read => \@read, readtype => "phred".$phred_value, quality => $quality_threshold );
-		
-		#		print "Read $read[1]"."Lengh of new_Read = ".length( $read[1] )."\n\n\n";
-#		next if length( $read[1] ) < $min_read_length;
-#		my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
-#		
-		#print STDERR "qiime_Ready ready @qiime_read1";
-#		$qiime_read1[0] =~ s/\n/\tNot_merged\n/;
-#		$mpf_count{$handle}++;
-#		print OUT_QIIME_FOR @qiime_read1;
-#		@read = ();
-#		$count++;
-#	    }
-#	    close(INFORWARD);
-#	} else {
-#	    print STDERR "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq was not found\n";
-#	}
 	##reset the read count increment
 	$sample_read_count{$handle} = $sample_read_count{$handle} - $count;
 	
-#	if ( -e "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_2.fastq" ) {
-#	    open( INREVERSE, "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_2.fastq" );
-#	    my @read = ();
-#	    while (<INREVERSE>) {
-#		$read[0] = $_;
-#		$read[1] = <INREVERSE>;
-#		$read[2] = <INREVERSE>;
-#		$read[3] = <INREVERSE>;
-#		qtrim_read( read => \@read, readtype => "phred".$phred_value, quality => $quality_threshold );
-#		next if length( $read[1] ) < $min_read_length;
-#		my @qiime_read1 = convert_to_qiime_read( read_array => \@read, sample => $handle );
-#		
-			#print STDERR "qiime_Ready ready @qiime_read1";
-#		$qiime_read1[0] =~ s/\n/\tNot_merged\n/;
-#		print OUT_QIIME_REV @qiime_read1;
-#		$mpr_count{$handle}++;
-#		@read = ();
-#		$count++;
-#	    }
-#		close(INREVERSE);
-#	} else {
-#	    print STDERR "$output_dir/qiime_ready/$out_file_core.".$handle.".notCombined_1.fastq was not found\n";
-#	}
+
 	close(OUT_QIIME);
-	
-	#zip the raw files
-#	my $file_1 = "$output_dir/raw_fastq/$out_file_core"."_$handle"."_1.fastq"; 
-#	my $file_2 = "$output_dir/raw_fastq/$out_file_core"."_$handle"."_2.fastq"; 
 #	`gzip -f "$file_1"`;
 #	`gzip -f "$file_2"`;
     }

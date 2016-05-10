@@ -11,7 +11,7 @@ Samples are demultiplexed 96 at a time by default. The script will loop until al
 
 * [Anthony Bolger's `trimmomatic.jar`](http://www.usadellab.org/cms/?page=trimmomatic)
 * [FLASH, a tool for merging paired-end reads](http://ccb.jhu.edu/software/FLASH/)
-
+* [FLASH2, improved version of FLASH] (https://github.com/dstreett/FLASH2)
 ## Usage
 
 ```bash
@@ -82,3 +82,5 @@ index reads.  It allows 1 mismatch for each index read.
 
 **--min-read-length** [n] Discards reads that end up being shorter than the number
 after the QC (and maybe merging).
+
+**--demul-only** [n] Skips all QC and merging steps
